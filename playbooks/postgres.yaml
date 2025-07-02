@@ -1,0 +1,92 @@
+---
+- hosts: dbservers
+  become: true
+  become_user: root
+
+  pre_tasks:
+    - name: Install the PostgreSQL packages
+      apt:
+        name:
+          - postgresql-contrib
+          - postgresql-client
+        state: present
+        update_cache: true
+
+    - name: Install python3-pip (for psycopg2 module)
+      apt:
+        name: python3-pip
+        state: present
+        update_cache: true
+
+    - name: Install psycopg2 system package
+      apt:
+        name: python3-psycopg2
+        state: present
+
+  tasks:
+    - name: Check if PostgreSQL data directory exists
+      ansible.builtin.stat:
+        path: /var/lib/postgresql/16/main
+      register: postgres_data
+
+    - name: Debug postgres_data.stat (just for troubleshooting)
+      ansible.builtin.debug:
+        msg: "postgres data exists? {{ postgres_data.stat.exists }}"
+
+    - name: Start and enable PostgreSQL service
+      service:
+        name: postgresql
+        state: started
+        enabled: true
+
+    - name: Create the application database
+      postgresql_db:
+        name: "{{ db.name }}"
+        state: present
+      become_user: postgres
+
+    - name: Create the database user
+      postgresql_user:
+        name: "{{ db.user }}"
+        password: "{{ db.password }}"
+        state: present
+      become_user: postgres
+
+    - name: Grant owner privileges on the database to the app user
+      postgresql_db:
+        name: "{{ db.name }}"
+        owner: "{{ db.user }}"
+        state: present
+      become_user: postgres
+
+    - block:
+      - name: Allow md5 authentication for the app user in pg_hba.conf
+        postgresql_pg_hba:
+          dest: "/etc/postgresql/16/main/pg_hba.conf"
+          contype: host
+          databases: all
+          users: "{{ db.user }}"
+          address: "0.0.0.0/0"
+          method: md5
+          state: present
+        notify: restart postgresql
+        become_user: postgres
+
+      - name: Allow connections from all addresses (listen_addresses) in postgresql.conf
+        lineinfile:
+          path: "/etc/postgresql/16/main/postgresql.conf"
+          regexp: "^#listen_addresses = 'localhost'"
+          line: "listen_addresses = '*'"
+          state: present
+        notify: restart postgresql
+        become_user: postgres
+
+      when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '24.04'
+
+
+  handlers:
+    - name: restart postgresql
+      service:
+        name: postgresql
+        state: restarted
+      become_user: root

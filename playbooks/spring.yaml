@@ -1,0 +1,107 @@
+---
+- hosts: all
+
+  pre_tasks:
+    - name: Install Java
+      apt:
+          name: openjdk-21-jdk
+          state: present
+          update_cache: true
+      become: true
+
+  tasks:
+      - name: "debug appdir"
+        ansible.builtin.debug:
+          msg: "appdir {{ansible_user_dir}}"
+
+      - name: "Clone the Spring repository"
+        git:
+          repo:           git@github.com:Alexar77/HomeSharing.git
+          dest:           "{{ appdir }}"
+          version:        "{{ branch }}"
+          key_file:       "{{ ansible_user_dir }}/.ssh/id_git"
+          accept_hostkey: yes
+          force:          true
+
+      - name: Ensure mvnw is executable
+        file:
+          path: "{{ appdir }}/mvnw"
+          mode: '0755'
+
+      - name: "Populate application.properties"
+        lineinfile:
+          dest: "{{ appdir }}/src/main/resources/application.properties"
+          state: present
+          regexp: "^{{item.key}}="
+          line: "{{item.key}}={{item.value}}"
+        with_items:
+          - "{{app.env | dict2items}}"
+
+      
+      - name: "Build spring project"
+        block:
+
+        - name: "Build the Spring application"
+          command: "./mvnw package -Dmaven.test.skip "
+          args:
+              chdir: "{{ appdir }}"
+
+        rescue:
+
+        - name: Fetch the SHA-512 checksum for Maven 3.9.9
+          get_url:
+            url: https://downloads.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip.sha512
+            dest: /tmp/maven_sha512.txt
+            validate_certs: true
+            force: true
+
+        - name: Read the SHA-512 checksum from the file
+          command: cat /tmp/maven_sha512.txt
+          register: sha512_checksum
+
+        - name: Replace the distributionSha512Sum line in maven-wrapper.properties
+          replace:
+            path: "{{ appdir }}/.mvn/wrapper/maven-wrapper.properties"
+            regexp: '^distributionSha'
+            replace: "distributionSha512Sum={{ sha512_checksum.stdout }}"
+        
+        - name: Clean up the temporary file
+          file:
+            path: /tmp/maven_sha512.txt
+            state: absent
+          when: sha512_checksum is defined
+        
+        always:
+          - name: "Build the Spring application"
+            command: "./mvnw package -Dmaven.test.skip "
+            args:
+                chdir: "{{ appdir }}"
+
+
+      - name: copy spring service file
+        template:
+          src: ../files/spring.service.j2
+          dest: "/etc/systemd/system/spring.service"
+        become: true
+        become_user: root
+        notify: restart spring
+
+      - name: reload spring service
+        service:
+          name: spring
+          state: restarted
+        become: true
+
+      - name: ensure spring service started
+        service:
+          name: spring
+          state: started
+          enabled: true
+        become: true
+
+  handlers:
+  - name: restart spring
+    service:
+      name: spring
+      state: restarted
+    become: true

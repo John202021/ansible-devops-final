@@ -1,0 +1,63 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check if Docker + Compose plugin are installed
+      shell: |
+        docker --version
+        docker compose version
+      register: docker_version
+      ignore_errors: true
+
+    - name: Set docker_installed fact
+      set_fact:
+        docker_installed: "{{ docker_version.rc == 0 }}"
+
+- import_playbook: docker.yaml
+  when: not docker_installed
+
+- hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Clone the Spring repository
+      git:
+        repo: git@github.com:Alexar77/HomeSharing.git
+        dest: "{{ appdir }}"
+        version: "{{ branch }}"
+        key_file: "{{ ansible_user_dir }}/.ssh/id_git"
+        accept_hostkey: true
+        force: true
+
+    - name: Populate application.properties
+      lineinfile:
+        dest: "{{ appdir }}/src/main/resources/application.properties"
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+        state: present
+      loop: "{{ app.env | dict2items }}"
+
+    - name: Tear down existing services
+      become: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ appdir }}"
+        state: absent
+
+    - name: Create and start services
+      become: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ appdir }}"
+        build: always
+        state: present
+      register: output
+      notify: Restart Docker Compose
+
+    - debug:
+        var: output
+
+  handlers:
+    - name: Restart Docker Compose
+      become: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ appdir }}"
+        state: restarted

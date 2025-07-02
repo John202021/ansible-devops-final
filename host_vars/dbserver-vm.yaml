@@ -1,0 +1,4 @@
+db:
+  name: "homesharing"
+  user: "dbuser"
+  password: "pass123"
