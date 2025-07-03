@@ -5,6 +5,7 @@ appgroup: "{{ ansible_user_gid }}"
 app_port: 8080
 app:
   env:
+    minio.endpoint: "http://localhost:9000"
     server.port: "{{ app_port }}"
     spring.datasource.username: dbuser
     spring.datasource.password: pass123

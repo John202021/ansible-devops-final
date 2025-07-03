@@ -1,0 +1,66 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check if Docker + Compose plugin are installed
+      shell: |
+        docker --version
+        docker compose version
+      register: docker_version
+      ignore_errors: true
+
+    - name: Set docker_installed fact
+      set_fact:
+        docker_installed: "{{ docker_version.rc == 0 }}"
+
+- import_playbook: docker.yaml
+  when: not docker_installed
+
+- hosts: all
+  become: true
+
+  vars:
+    # ── tune as you wish ─────────────────────────────────────────────
+    minio_image:         "minio/minio:latest"
+    minio_container:     "minio"
+    minio_host_path:     "{{ ansible_user_dir }}/minio/data"
+    minio_ports:
+      - "9000:9000"          # S3 API
+      - "9001:9001"          # Web console
+    minio_root_user:     "{{ lookup('env','MINIO_ROOT_USER') | default('minioadmin') }}"
+    minio_root_password: "{{ lookup('env','MINIO_ROOT_PASSWORD') | default('minioadmin') }}"
+    # ────────────────────────────────────────────────────────────────
+
+  tasks:
+    - name: Ensure MinIO data directory exists
+      file:
+        path: "{{ minio_host_path }}"
+        state: directory
+        owner: root 
+        mode: "0755"
+
+    - name: Deploy/Update MinIO container
+      community.docker.docker_container:
+        name: "{{ minio_container }}"
+        image: "{{ minio_image }}"
+        restart_policy: always
+        state: started 
+        command: server /data --console-address ":9001"
+        env:
+          MINIO_ROOT_USER: "{{ minio_root_user }}"
+          MINIO_ROOT_PASSWORD: "{{ minio_root_password }}"
+        published_ports: "{{ minio_ports }}"
+        mounts:
+          - source: "{{ minio_host_path }}"
+            target: /data
+            type: bind
+
+
+    - name: Wait for the console to answer
+      ansible.builtin.uri:
+        url: http://localhost:9001/minio/health/ready
+        status_code: 200
+      register: minio_health
+      retries: 15
+      delay: 4
+      until: minio_health.status == 200

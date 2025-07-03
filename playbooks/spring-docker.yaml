@@ -19,6 +19,7 @@
 - hosts: all
   gather_facts: true
 
+
   tasks:
     - name: Clone the Spring repository
       git:
@@ -38,13 +39,11 @@
       loop: "{{ app.env | dict2items }}"
 
     - name: Tear down existing services
-      become: true
       community.docker.docker_compose_v2:
         project_src: "{{ appdir }}"
         state: absent
 
     - name: Create and start services
-      become: true
       community.docker.docker_compose_v2:
         project_src: "{{ appdir }}"
         build: always
@@ -57,7 +56,6 @@
 
   handlers:
     - name: Restart Docker Compose
-      become: true
       community.docker.docker_compose_v2:
         project_src: "{{ appdir }}"
         state: restarted
