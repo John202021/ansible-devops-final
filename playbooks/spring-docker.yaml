@@ -43,6 +43,13 @@
         project_src: "{{ appdir }}"
         state: absent
 
+    - name: Remove any stray /minio container
+      community.docker.docker_container:
+        name: minio
+        state: absent
+        force_kill: true
+      ignore_errors: true
+
     - name: Create and start services
       community.docker.docker_compose_v2:
         project_src: "{{ appdir }}"
